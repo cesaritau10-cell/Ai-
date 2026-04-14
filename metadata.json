@@ -1,0 +1,6 @@
+{
+  "name": "AI Authenticator",
+  "description": "Detector de Mídia Sintética: Verifique a autenticidade de fotos e vídeos para descobrir se são reais ou gerados por inteligência artificial.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
