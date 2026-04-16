@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { GoogleGenAI, Type } from '@google/genai';
-import { ShieldCheck, Image as ImageIcon, Video, Upload, Loader2, FileSearch, ChevronRight, AlertTriangle, Clapperboard } from 'lucide-react';
+import { ShieldCheck, Image as ImageIcon, Video, Upload, Loader2, FileSearch, ChevronRight, AlertTriangle, Clapperboard, Share2, Check } from 'lucide-react';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -29,7 +29,36 @@ export default function App() {
   const [videoResult, setVideoResult] = useState<AnalysisResult | null>(null);
   const [videoError, setVideoError] = useState<string | null>(null);
   const [isYoutubeWarning, setIsYoutubeWarning] = useState(false);
+  const [videoUploadProgress, setVideoUploadProgress] = useState<number>(0);
+  const [isUploadingVideo, setIsUploadingVideo] = useState(false);
+  const [analysisStatus, setAnalysisStatus] = useState<string>('');
   const videoInputRef = useRef<HTMLInputElement>(null);
+
+  // Share State
+  const [copiedState, setCopiedState] = useState<'image' | 'video' | null>(null);
+
+  const handleShare = async (result: AnalysisResult, type: 'image' | 'video') => {
+    const text = `AI Authenticator 🕵️‍♂️\n\nProbabilidade de ser IA: ${result.probability}%\n\nJustificativa: ${result.justification}\n\nArtefatos detectados: ${result.artifacts.length > 0 ? result.artifacts.join(', ') : 'Nenhum'}`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Resultado da Análise - AI Authenticator',
+          text: text,
+        });
+      } catch (err) {
+        console.error('Erro ao compartilhar:', err);
+      }
+    } else {
+      try {
+        await navigator.clipboard.writeText(text);
+        setCopiedState(type);
+        setTimeout(() => setCopiedState(null), 2000);
+      } catch (err) {
+        console.error('Erro ao copiar:', err);
+      }
+    }
+  };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement> | React.DragEvent) => {
     e.preventDefault();
@@ -62,8 +91,8 @@ export default function App() {
     }
 
     if (file && file.type.startsWith('video/')) {
-      if (file.size > 20 * 1024 * 1024) {
-        setVideoError('Vídeo muito grande. O limite é de 20MB para análise via navegador.');
+      if (file.size > 100 * 1024 * 1024) {
+        setVideoError('Vídeo muito grande. O limite é de 100MB para análise via navegador.');
         return;
       }
       setVideoFile(file);
@@ -71,8 +100,20 @@ export default function App() {
       setVideoResult(null);
       setIsYoutubeWarning(false);
       setVideoUrl('');
+      setIsUploadingVideo(true);
+      setVideoUploadProgress(0);
+
       const reader = new FileReader();
-      reader.onloadend = () => setVideoPreview(reader.result as string);
+      reader.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const progress = Math.round((event.loaded / event.total) * 100);
+          setVideoUploadProgress(progress);
+        }
+      };
+      reader.onloadend = () => {
+        setVideoPreview(reader.result as string);
+        setIsUploadingVideo(false);
+      };
       reader.readAsDataURL(file);
     }
   };
@@ -105,6 +146,25 @@ export default function App() {
     setError(null);
     setResult(null);
     setIsYoutubeWarning(false);
+
+    let statusInterval: NodeJS.Timeout | null = null;
+    if (type === 'video') {
+      const statuses = [
+        'Extraindo frames do vídeo...',
+        'Analisando consistência temporal...',
+        'Verificando artefatos de compressão...',
+        'Processando áudio e sincronia labial...',
+        'Finalizando análise com IA...'
+      ];
+      let statusIndex = 0;
+      setAnalysisStatus(statuses[0]);
+      statusInterval = setInterval(() => {
+        statusIndex = (statusIndex + 1) % statuses.length;
+        setAnalysisStatus(statuses[statusIndex]);
+      }, 2500);
+    } else {
+      setAnalysisStatus('Processando análise visual...');
+    }
 
     try {
       const base64Data = await new Promise<string>((resolve, reject) => {
@@ -146,6 +206,7 @@ export default function App() {
       console.error(err);
       setError(err.message || "Ocorreu um erro durante a análise.");
     } finally {
+      if (statusInterval) clearInterval(statusInterval);
       setAnalyzing(false);
     }
   };
@@ -155,7 +216,12 @@ export default function App() {
       return (
         <div className="border border-neutral-800 rounded-2xl bg-neutral-900/30 p-8 flex flex-col items-center justify-center text-center min-h-[300px] h-full">
           <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mb-4" />
-          <p className="text-neutral-300 font-medium">Processando análise visual...</p>
+          <p className="text-neutral-300 font-medium">{analysisStatus}</p>
+          {type === 'video' && (
+            <div className="mt-6 w-full max-w-xs bg-neutral-800 rounded-full h-1.5 overflow-hidden">
+              <div className="bg-indigo-500 h-full w-full animate-[pulse_2s_ease-in-out_infinite] origin-left"></div>
+            </div>
+          )}
         </div>
       );
     }
@@ -219,6 +285,16 @@ export default function App() {
               </ul>
             </div>
           )}
+
+          <div className="pt-2 flex justify-end">
+            <button
+              onClick={() => handleShare(result, type)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-sm font-medium transition-colors border border-neutral-700 hover:border-neutral-600"
+            >
+              {copiedState === type ? <Check className="w-4 h-4 text-emerald-500" /> : <Share2 className="w-4 h-4" />}
+              {copiedState === type ? 'Copiado para a área de transferência!' : 'Compartilhar Resultado'}
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -379,7 +455,19 @@ export default function App() {
                     onChange={handleVideoUpload}
                   />
                   
-                  {videoPreview && !videoUrl ? (
+                  {isUploadingVideo ? (
+                    <div className="flex flex-col items-center py-8 w-full max-w-xs mx-auto">
+                      <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mb-4" />
+                      <p className="font-medium text-neutral-200 mb-2">Carregando vídeo...</p>
+                      <div className="w-full bg-neutral-800 rounded-full h-2.5 mb-2 overflow-hidden">
+                        <div 
+                          className="bg-indigo-500 h-2.5 rounded-full transition-all duration-300" 
+                          style={{ width: `${videoUploadProgress}%` }}
+                        ></div>
+                      </div>
+                      <p className="text-sm text-neutral-400">{videoUploadProgress}%</p>
+                    </div>
+                  ) : videoPreview && !videoUrl ? (
                     <div className="relative rounded-lg overflow-hidden bg-black">
                       <video src={videoPreview} controls className="w-full max-h-48 object-contain" />
                       <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-md px-3 py-1 rounded-md text-xs font-medium text-white cursor-pointer hover:bg-black/80">
@@ -392,7 +480,7 @@ export default function App() {
                         <Clapperboard className="w-8 h-8 text-neutral-400 group-hover:text-indigo-400 transition-colors" />
                       </div>
                       <p className="font-medium text-neutral-200 text-lg">Clique ou arraste um vídeo</p>
-                      <p className="text-sm text-neutral-500 mt-2">MP4, MOV, AVI (máx 20MB)</p>
+                      <p className="text-sm text-neutral-500 mt-2">MP4, MOV, AVI (máx 100MB)</p>
                     </div>
                   )}
                 </div>
